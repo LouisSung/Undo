@@ -1,7 +1,9 @@
+import gc
+import sys
 from typing import Callable, List, Tuple
 
 
-class UndoDemo:
+class UndoFunc:
     def __init__(self):
         self.hihi = []
         self._undo_stack: List[Callable] = []
@@ -9,60 +11,62 @@ class UndoDemo:
     def say_hi_to(self, name: str) -> Tuple[Callable, Tuple[str, ...]]:
         _local_undo_stack: List[Callable] = []
 
-        # === start doing stuff ===
+        # === Start Doing Stuff ===
         tmp_list: List[str] = []
         self.hihi.append(tmp_list)
-        # use `remove()` instead of `pop()` to support unordered undo
+        # Use `remove()` instead of `pop()` to support unordered undo
         _local_undo_stack.append(lambda: self.hihi.remove(tmp_list))
 
         tmp_list.append('Hi')
-        # `pop()` does not support unordered undo but it's ok for local undo
+        # The `pop()` does not support unordered undo but it's OK for (linear) local undo
         _local_undo_stack.append(lambda: tmp_list.pop())
         tmp_list.append(name)
         _local_undo_stack.append(lambda: tmp_list.pop())
 
         _result = tuple(tmp_list)
-        # === end doing stuff ===
+        # === End Doing Stuff ===
 
-        return self._undo_a_func(_local_undo_stack), _result
+        return self._undo_func_call(_local_undo_stack), _result
 
-    def undo(self, undo_all: bool = False) -> bool:
+    def undo(self, undo_all: bool = False, purge: bool = False) -> int:
         if len(self._undo_stack) == 0:
-            return False  # nothing to undo
+            return -1
+        elif purge:
+            self._undo_stack.clear()
         else:
-            # undo funcs in reverse order
-            # don't do `pop()` here, it's done in the end of the inner `undo_a_func()`
+            # Undo funcs in the reverse order
+            # Don't do the `pop()` here, it's done in the end of the inner `_undo_a_func()`
             while self._undo_stack:
                 (self._undo_stack[-1])()
-                if not undo_all:
-                    break  # undo once only
-            return True
+                if not undo_all:  # undo once only
+                    break
+        return len(self._undo_stack)
 
-    def _undo_a_func(self, func_local_undo_stack: List[Callable]) -> Callable:
-        def undo_func():
-            if hasattr(undo_func, 'has_called'):
+    def _undo_func_call(self, func_local_undo_stack: List[Callable]) -> Callable:
+        def _undo_a_func():
+            if hasattr(_undo_a_func, 'has_called'):
                 raise ValueError('NEVER invoke the returned `undo()` twice')
             else:
-                undo_func.__dict__['has_called'] = True
+                _undo_a_func.__setattr__('has_called', True)
                 while func_local_undo_stack:
                     (func_local_undo_stack.pop())()
-                # remove self (i.e., lambda: undo_func()) from the global undo stack
-                self._undo_stack.remove(undo_func.__dict__['undo_lambda'])
+                # Remove self (i.e., lambda: _undo_a_func()) from the global undo stack
+                self._undo_stack.remove(_undo_a_func._undo_lambda)
 
-        undo_func.undo_lambda = lambda: undo_func()
-        self._undo_stack.append(undo_func.undo_lambda)
-        return undo_func.undo_lambda
+        _undo_a_func._undo_lambda = lambda: _undo_a_func()
+        self._undo_stack.append(_undo_a_func._undo_lambda)
+        return _undo_a_func._undo_lambda
 
 
 if __name__ == '__main__':
-    demo = UndoDemo()
+    demo = UndoFunc()
     _, result = demo.say_hi_to('World')  # use _ to consume useless undo
     print(result)  # ('Hi', 'World')
     undo, result = demo.say_hi_to('Gura')
     print(demo.hihi, result)  # [['Hi', 'World'], ['Hi', 'Gura']] ('Hi', 'Gura')
 
     undo()
-    # undo()  # !!! ValueError: NEVER invoke the returned `undo()` twice
+    # undo()  # !!! [UNCOMMENT] ValueError: NEVER invoke the returned `undo()` twice
     print(demo.hihi)  # [['Hi', 'World']]
 
     demo.undo()
@@ -72,10 +76,13 @@ if __name__ == '__main__':
     print(result)  # ('Hi', 'A')
     demo.say_hi_to('SHAAAAAARK')
     print(demo.hihi)  # [['Hi', 'A'], ['Hi', 'SHAAAAAARK']]
+    demo.say_hi_to('MEATLOAF')
+    print(demo.hihi)  # [['Hi', 'A'], ['Hi', 'SHAAAAAARK'], ['Hi', 'MEATLOAF']]
 
-    demo.undo(undo_all=True)
+    print(demo.undo())  # undo the last one (3 -> 2), returned 2
+    print(demo.undo(undo_all=True))  # undo all (2 -> 0), returned 0
     print(demo.hihi)  # []
-    demo.undo()  # nothing will happen (i.e., nothing to undo, return False)
+    print(demo.undo())  # nothing to undo (0 -> 0), returned -1
 
     # Unordered Undo (requires the function local undo also be well designed)
     undo1, _ = demo.say_hi_to('1. unordered')
