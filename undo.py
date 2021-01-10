@@ -3,10 +3,45 @@ import sys
 from typing import Callable, List, Tuple
 
 
-class UndoFunc:
+class UndoAble:
     def __init__(self):
-        self.hihi = []
         self._undo_stack: List[Tuple[Callable, Callable]] = []
+
+    def undo(self, undo_all: bool = False, purge: bool = False) -> int:
+        if len(self._undo_stack) == 0:
+            return -1
+        elif purge:
+            while self._undo_stack:
+                (self._undo_stack.pop()[1])()
+        else:
+            # Undo funcs in the reverse order
+            # Don't do the `pop()` here, it's done in the end of the inner `_undo_a_func()`
+            while self._undo_stack:
+                (self._undo_stack[-1][0])()
+                if not undo_all:  # undo once only
+                    break
+        return len(self._undo_stack)
+
+    def _register_undo(self, local_undo_stack: List[Callable], purge_callback: Callable = lambda: None) -> Callable:
+        def _undo_a_func():
+            if hasattr(_undo_a_func, 'has_called'):
+                raise ValueError('NEVER invoke the returned `undo()` twice')
+            else:
+                _undo_a_func.__setattr__('has_called', True)
+                while local_undo_stack:
+                    (local_undo_stack.pop())()
+                # Remove self (i.e., lambda: _undo_a_func()) from the global undo stack
+                self._undo_stack.remove(_undo_a_func._undo_lambdas)
+
+        _undo_a_func._undo_lambdas = (lambda: _undo_a_func(), lambda: purge_callback())
+        self._undo_stack.append(_undo_a_func._undo_lambdas)
+        return _undo_a_func._undo_lambdas[0]
+
+
+class UndoAbleFunc(UndoAble):
+    def __init__(self):
+        super().__init__()
+        self.hihi: List[List[str]] = []
 
     def say_hi_to(self, name: str) -> Tuple[Callable, List[str]]:
         _local_undo_stack: List[Callable] = []
@@ -24,41 +59,11 @@ class UndoFunc:
         _local_undo_stack.append(lambda: stuff_result.pop())
         # === End Doing Stuff ===
 
-        return self._undo_func_call(_local_undo_stack, lambda: self.hihi.remove(stuff_result)), stuff_result
-
-    def undo(self, undo_all: bool = False, purge: bool = False) -> int:
-        if len(self._undo_stack) == 0:
-            return -1
-        elif purge:
-            while self._undo_stack:
-                (self._undo_stack.pop()[1])()
-        else:
-            # Undo funcs in the reverse order
-            # Don't do the `pop()` here, it's done in the end of the inner `_undo_a_func()`
-            while self._undo_stack:
-                (self._undo_stack[-1][0])()
-                if not undo_all:  # undo once only
-                    break
-        return len(self._undo_stack)
-
-    def _undo_func_call(self, local_undo_stack: List[Callable], purge_callback: Callable = lambda: None) -> Callable:
-        def _undo_a_func():
-            if hasattr(_undo_a_func, 'has_called'):
-                raise ValueError('NEVER invoke the returned `undo()` twice')
-            else:
-                _undo_a_func.__setattr__('has_called', True)
-                while local_undo_stack:
-                    (local_undo_stack.pop())()
-                # Remove self (i.e., lambda: _undo_a_func()) from the global undo stack
-                self._undo_stack.remove(_undo_a_func._undo_lambdas)
-
-        _undo_a_func._undo_lambdas = (lambda: _undo_a_func(), lambda: purge_callback())
-        self._undo_stack.append(_undo_a_func._undo_lambdas)
-        return _undo_a_func._undo_lambdas[0]
+        return self._register_undo(_local_undo_stack, lambda: self.hihi.remove(stuff_result)), stuff_result
 
 
 if __name__ == '__main__':
-    demo = UndoFunc()
+    demo = UndoAbleFunc()
     _, result = demo.say_hi_to('World')  # use _ to consume useless undo
     print(result)  # ['Hi', 'World']
     undo, result = demo.say_hi_to('Gura')
@@ -93,10 +98,10 @@ if __name__ == '__main__':
     print(demo.hihi)  # []
 
     # FIXME: Uncomment following code to check if garbage collection gets invoked
-    # memcheck_func = UndoFunc()
-    # memcheck_purge = UndoFunc()
+    # memcheck_func = UndoAbleFunc()
+    # memcheck_purge = UndoAbleFunc()
     # while True:
-    #     memcheck_instance = UndoFunc()
+    #     memcheck_instance = UndoAbleFunc()
     #
     #     for i in range(620):
     #         memcheck_instance.say_hi_to('Bloop')  # auto garbage collected
