@@ -92,3 +92,18 @@ if __name__ == '__main__':
     print(demo.hihi)  # [['Hi', '2. undo']]
     undo2()
     print(demo.hihi)  # []
+
+    # FIXME: Uncomment following code to check if garbage collection gets invoked
+    # mem_check_func = UndoFunc()
+    # while True:
+    #     mem_check_instance = UndoFunc()
+    #
+    #     for i in range(620):
+    #         mem_check_instance.say_hi_to('Bloop')
+    #         mem_check_func.say_hi_to('Trident')
+    #         # mem_check_func.undo()  # [UNCOMMENT] prevent the ref count growth
+    #         undo, _ = mem_check_func.say_hi_to('padowo')
+    #         # undo()  # [UNCOMMENT] prevent the ref count growth
+    #
+    #     ref_func, ref_instance = sys.getrefcount(mem_check_func), sys.getrefcount(mem_check_instance)
+    #     print(f'[RefCount]Instance: {ref_instance}, Func: {ref_func: >2}; GC: {len(gc.get_objects()): >6}')
