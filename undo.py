@@ -29,7 +29,7 @@ class UndoAble:
         del self._undo_stack[-merge_count:]
         self._register_func_undo(
             [lambda: [undo_merged() for undo_merged, _ in merged_undo]],
-            lambda: [purge_merged() for purge_merged, _ in merged_undo]
+            lambda: [purge_merged() for _, purge_merged in merged_undo]
         )
 
     def _register_func_undo(self, local_undo_stack: List[Callable], purge_callback: Callable = lambda: None):
