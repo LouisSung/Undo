@@ -1,41 +1,74 @@
 import gc
 import sys
-from typing import Callable, List, Tuple
+from typing import Callable, List, Tuple, Union
 
 
 class UndoAble:
     def __init__(self):
-        self._undo_stack: List[Tuple[Callable, Callable]] = []
+        self._undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = []
 
-    def undo(self, undo_all: bool = False, purge: bool = False) -> int:
-        if len(self._undo_stack) == 0:
-            return -1
-        elif purge:
-            while self._undo_stack:
-                (self._undo_stack.pop()[1])()
-        else:
-            # Undo funcs in the reverse order
-            # Don't do the `pop()` here, it's done in the end of the inner `_undo_a_func()`
-            while self._undo_stack:
-                (self._undo_stack[-1][0])()
-                if not undo_all:  # undo once only
-                    break
-        return len(self._undo_stack)
-
-    def _register_undo(self, local_undo_stack: List[Callable], purge_callback: Callable = lambda: None) -> Callable:
-        def _undo_a_func():
-            if hasattr(_undo_a_func, 'has_called'):
-                raise ValueError('NEVER invoke the returned `undo()` twice')
+    def undo(self, undo_last: int = 1, undo_all: bool = False,
+             undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = None) -> int:
+        undo_stack = self._undo_stack if undo_stack is None else undo_stack  # used for recursive
+        if len(undo_stack) == 0 or undo_last < 1:
+            return -1  # nothing to undo
+        undo_count = len(undo_stack) if undo_all else min(undo_last, len(undo_stack))
+        for _ in range(undo_count):
+            undo_lambdas = undo_stack[-1]  # use [-1] instead of pop() because it's done by the inner _remove_lambdas()
+            if isinstance(undo_lambdas, list):
+                self.undo(undo_all=True, undo_stack=undo_lambdas)  # undo all lambdas in the list
+                undo_stack.remove(undo_lambdas)  # remove empty list
             else:
-                _undo_a_func.__setattr__('has_called', True)
-                while local_undo_stack:
-                    (local_undo_stack.pop())()
-                # Remove self (i.e., lambda: _undo_a_func()) from the global undo stack
-                self._undo_stack.remove(_undo_a_func._undo_lambdas)
+                undo_lambdas[0]()  # undo
+        return len(undo_stack)
 
-        _undo_a_func._undo_lambdas = (lambda: _undo_a_func(), lambda: purge_callback())
-        self._undo_stack.append(_undo_a_func._undo_lambdas)
-        return _undo_a_func._undo_lambdas[0]
+    def purge_undo(self, purge_last: int = 1, purge_all: bool = True,
+                   undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = None) -> int:
+        undo_stack = self._undo_stack if undo_stack is None else undo_stack  # used for recursive
+        if len(undo_stack) == 0 or purge_last < 1:
+            return -1  # nothing to purge
+        purge_count = len(self._undo_stack) if purge_all else min(purge_last, len(self._undo_stack))
+        for _ in range(purge_count):
+            purge_lambdas = undo_stack.pop()
+            if isinstance(purge_lambdas, list):
+                self.purge_undo(purge_all=True, undo_stack=purge_lambdas)  # purge all lambdas in the list
+                undo_stack.remove(purge_lambdas)  # remove empty list
+            else:
+                purge_lambdas[1]()  # purge
+        return len(undo_stack)
+
+    def merge_undo(self, merge_last: int = 2, merge_all: bool = True):
+        merge_count = len(self._undo_stack) if merge_all else max(min(merge_last, len(self._undo_stack)), 0)
+        merged_undo = self._undo_stack[-merge_count:]
+        del self._undo_stack[-merge_count:]
+        self._undo_stack.append(merged_undo)  # merge multiple undo as a single one
+
+    def _register_func_undo(self, local_undo_stack: List[Callable],
+                            purge_callback: Callable = lambda: None) -> Callable:
+        def _remove_lambdas(undo_stack: List[Tuple[Callable, Callable]], target: Tuple[Callable, Callable]) -> bool:
+            for undo_lambdas in reversed(undo_stack):  # search from the end (as it's a stack)
+                if undo_lambdas == target:  # found target undo lambdas
+                    undo_stack.remove(undo_lambdas)
+                    return True
+                elif isinstance(undo_lambdas, list) and _remove_lambdas(undo_lambdas, target):  # found in list
+                    return True
+            return False
+
+        def _undo_func() -> int:
+            if hasattr(_undo_func, 'has_called'):  # should never call an undo twice
+                raise ValueError('NEVER invoke the returned `undo()` twice')
+            elif len(self._undo_stack) == 0:
+                return -1  # nothing to undo, happens when the undo has been purged
+            else:
+                _undo_func.__setattr__('has_called', True)
+                while local_undo_stack:  # undo a function
+                    (local_undo_stack.pop())()
+                _remove_lambdas(self._undo_stack, _undo_func._undo_lambdas)  # search and remove lambdas from the stack
+                return len(self._undo_stack)
+
+        _undo_func._undo_lambdas = (lambda: _undo_func(), lambda: purge_callback())  # no memory leaks here
+        self._undo_stack.append(_undo_func._undo_lambdas)
+        return _undo_func._undo_lambdas[0]  # return undo handler
 
 
 class UndoAbleFunc(UndoAble):
@@ -59,62 +92,103 @@ class UndoAbleFunc(UndoAble):
         _local_undo_stack.append(lambda: stuff_result.pop())
         # === End Doing Stuff ===
 
-        return self._register_undo(_local_undo_stack, lambda: self.hihi.remove(stuff_result)), stuff_result
+        return self._register_func_undo(_local_undo_stack), stuff_result
 
 
 if __name__ == '__main__':
     demo = UndoAbleFunc()
-    _, result = demo.say_hi_to('World')  # use _ to consume useless undo
-    print(result)  # ['Hi', 'World']
+    # === [Basic] Undo ===
+    _, result = demo.say_hi_to('Gawr')  # use _ to consume useless undo
+    print('result:', result)  # result: ['Hi', 'Gawr']
     undo, result = demo.say_hi_to('Gura')
-    print(demo.hihi, result)  # [['Hi', 'World'], ['Hi', 'Gura']] ['Hi', 'Gura']
+    print('hihi01:', demo.hihi, '; result:',  result)  # hihi01: [[...], [...]] ; result: ['Hi', 'Gura']
 
     undo()
     # undo()  # !!! [UNCOMMENT] ValueError: NEVER invoke the returned `undo()` twice
-    print(demo.hihi)  # [['Hi', 'World']]
+    print('hihi02:', demo.hihi)  # hihi02: [['Hi', 'Gawr']]
 
     demo.undo()
-    print(demo.hihi)  # []
+    print('hihi03:', demo.hihi)  # hihi03: []
 
     result = demo.say_hi_to('A')[1]
-    print(result)  # ['Hi', 'A']
     demo.say_hi_to('SHAAAAAARK')
-    print(demo.hihi)  # [['Hi', 'A'], ['Hi', 'SHAAAAAARK']]
     demo.say_hi_to('MEATLOAF')
-    print(demo.hihi)  # [['Hi', 'A'], ['Hi', 'SHAAAAAARK'], ['Hi', 'MEATLOAF']]
+    print('hihi04:', demo.hihi)  # hihi04: [['Hi', 'A'], ['Hi', 'SHAAAAAARK'], ['Hi', 'MEATLOAF']]
 
-    print(demo.undo())  # undo the last one (3 -> 2), returned 2
-    print(demo.undo(undo_all=True))  # undo all (2 -> 0), returned 0
-    print(demo.hihi)  # []
-    print(demo.undo())  # nothing to undo (0 -> 0), returned -1
+    print('stack01', demo.undo())  # stack01: 2, undo the last one (3) [A, S, M] -> (2) [A, S], returned 2
+    print('hihi05:', demo.hihi)  # hihi05: [['Hi', 'A'], ['Hi', 'SHAAAAAARK']]
+    print('stack02:', demo.undo(undo_all=True))  # stack02: 0, undo all (2) [A, S] -> (0) [], returned 0
+    print('hihi06:', demo.hihi)  # hihi06: []
+    print('stack03:', demo.undo())  # stack03: -1, nothing to undo (0) [] -> (0) [], returned -1
 
-    # Unordered Undo (requires the function local undo also be well designed)
-    undo1, _ = demo.say_hi_to('1. unordered')
-    undo2, _ = demo.say_hi_to('2. undo')
+    # === [Basic] Purge Undo ===
+    demo.say_hi_to('Gawr')
+    undo, _ = demo.say_hi_to('Gura')
+    print('stack04:', len(demo._undo_stack), '; hihi07:', demo.hihi)  # stack04: 2 ; hihi07: [[...], [...]]
+    demo.purge_undo()
+    print('stack05:', len(demo._undo_stack), '; hihi08:', demo.hihi)  # stack05: 0 ; hihi08: [[...], [...]]
+    print('stack06:', undo())  # stack06: -1
+    print('stack07:', demo.undo())  # stack07: -1
+    demo.hihi.clear()
 
-    undo1()  # undo1 (second last) instead of undo2 (last)
-    print(demo.hihi)  # [['Hi', '2. undo']]
-    undo2()
-    print(demo.hihi)  # []
+    # === [Basic] Merge Undo ===
+    demo.say_hi_to('Gawr')
+    demo.say_hi_to('Gura')
+    undo, _ = demo.say_hi_to('Bloop')
+    print('stack08:', len(demo._undo_stack), '; hihi09:', demo.hihi)  # stack08: 3 ; hihi09: [[...], [...], [...]]
+    demo.merge_undo()  # merge all: (3) [Gawr, Gura, Bloop] -> (1) [[Gawr, Gura, Bloop]]
+    print('stack09:', len(demo._undo_stack), '; hihi10:', demo.hihi)  # stack09: 1 ; hihi10: [[...], [...], [...]]
+    # print('stackXX:', undo(), '; hihiXX:', demo.hihi)  # stackXX: 1 ; hihiXX: [[...], [...]]
+    print('stack10:', demo.undo(), '; hihi11:', demo.hihi)  # stack10: 0 ; hihi11: []
+    # undo()  # !!! [UNCOMMENT] ValueError: NEVER invoke the returned `undo()` twice
 
-    # FIXME: Uncomment following code to check if garbage collection gets invoked
+    demo.say_hi_to('Gawr')
+    demo.say_hi_to('Gura')
+    demo.say_hi_to('Bloop')
+    demo.merge_undo(merge_all=False)  # merge last 2 by default
+    print('stack11:', len(demo._undo_stack))  # stack11: 2
+    print('stack12:', demo.undo(), '; hihi12:', demo.hihi)  # stack12: 1 ; hihi12: [['Hi', 'Gawr']]
+
+    demo.say_hi_to('Gura')
+    demo.say_hi_to('Bloop')
+    demo.merge_undo(merge_all=False)  # merge last 2 once: (3) [Gawr, Gura, Bloop] -> (2) [Gawr, [Gura, Bloop]]
+    demo.merge_undo(merge_all=False)  # merge last 2 twice: (2) [Gawr, [Gura, Bloop]] -> (1) [[Gura, [Gura, Bloop]]]
+    print('stack13:', len(demo._undo_stack), '; hihi13:', demo.hihi)  # stack13: 1 ; hihi13: [[...], [...], [...]]
+    print('stack14:', demo.undo(), '; hihi14:', demo.hihi)  # stack14: 0 ; hihi14: []
+
+    # === [Advanced][WARNING] Unordered Undo Example (requires the function local undo also be well designed) ===
+    undo_gura, _ = demo.say_hi_to('Gura')
+    undo_bloop, _ = demo.say_hi_to('Bloop')
+
+    undo_gura()  # undo second last instead of last: (2) [Gura, Bloop] -> (1) [Bloop]
+    print('stack15:', len(demo._undo_stack), '; hihi15:', demo.hihi)  # stack15: 1 ; hihi15: [['Hi', 'Bloop']]
+    print('stack16:', demo.undo(), '; hihi16:', demo.hihi)  # stack16: 0 ; hihi16: []
+
+    demo.say_hi_to('Gura')
+    demo.say_hi_to('Bloop')
+    demo.purge_undo(purge_all=False)  # purge last undo: (2) [Gura, Bloop] -> (1) [Gura]
+    print('stack17:', demo.undo(), '; hihi17:', demo.hihi)  # stack17: 0 ; hihi17: [['Hi', 'Bloop']]
+
+    # === [Advanced] Memory Check ===
+    # FIXME: Uncomment following code to check if garbage collection gets invoked as expected (otherwise memory leaks)
     # memcheck_func = UndoAbleFunc()
     # memcheck_purge = UndoAbleFunc()
     # while True:
     #     memcheck_instance = UndoAbleFunc()
     #
     #     for i in range(620):
-    #         memcheck_instance.say_hi_to('Bloop')  # auto garbage collected
+    #         memcheck_instance.say_hi_to('Party Horns')  # ref_instance stay still (auto garbage collected)
     #
     #         memcheck_func.say_hi_to('Trident')
-    #         # memcheck_func.undo()  # [UNCOMMENT] prevent the ref_func & gc_count from growing
+    #         memcheck_func.undo()  # reduce ref_func (undo_stack) & gc_count (hihi)
     #
     #         undo, _ = memcheck_func.say_hi_to('Floaties')
-    #         # undo()  # [UNCOMMENT] prevent the ref_func & gc_count from growing
+    #         undo()  # reduce ref_func (undo_stack) & gc_count (hihi)
     #
     #         memcheck_purge.say_hi_to('padowo')
-    #         # memcheck_purge.undo(purge=True)  # [UNCOMMENT] prevent the ref_purge & gc_count from growing
+    #         memcheck_purge.purge_undo()  # reduce ref_purge (undo_stack) but the gc_count (hihi) keeps growing
+    #     memcheck_purge.hihi.clear()  # reduce gc_count (hihi)
     #
-    #     ref_func, ref_instance = sys.getrefcount(memcheck_func), sys.getrefcount(memcheck_instance)
+    #     ref_instance, ref_func = sys.getrefcount(memcheck_instance), sys.getrefcount(memcheck_func)
     #     ref_purge, gc_count = sys.getrefcount(memcheck_purge), len(gc.get_objects())
-    #     print(f'[RefCount]Instance: {ref_instance}, Func: {ref_func: >3}, Purge: {ref_purge: >2}; GC: {gc_count: >6}')
+    #     print(f'[Ref] Instance: {ref_instance}, Func: {ref_func: >2}, Purge: {ref_purge: >2}; GC: {gc_count: >5}')
