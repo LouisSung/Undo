@@ -1,69 +1,49 @@
 import gc
 import sys
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Tuple
 
 
 class UndoAble:
     def __init__(self):
-        self._undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = []
+        self._undo_stack: List[Tuple[Callable, Callable]] = []
 
-    def undo(self, undo_last: int = 1, undo_all: bool = False,
-             undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = None) -> int:
-        undo_stack = self._undo_stack if undo_stack is None else undo_stack  # used for recursive
-        if len(undo_stack) == 0 or undo_last < 1:
+    def undo(self, undo_last: int = 1, undo_all: bool = False) -> int:
+        if len(self._undo_stack) == 0 or undo_last < 1:
             return -1  # nothing to undo
-        undo_count = len(undo_stack) if undo_all else min(undo_last, len(undo_stack))
-        for _ in range(undo_count):
-            undo_lambdas = undo_stack[-1]  # use [-1] instead of pop() because it's done by the inner _remove_lambdas()
-            if isinstance(undo_lambdas, list):
-                self.undo(undo_all=True, undo_stack=undo_lambdas)  # undo all lambdas in the list
-                undo_stack.remove(undo_lambdas)  # remove empty list
-            else:
-                undo_lambdas[0]()  # undo
-        return len(undo_stack)
+        undo_count = len(self._undo_stack) if undo_all else min(undo_last, len(self._undo_stack))
+        for _ in range(undo_count):  # undo
+            (self._undo_stack[-1][0])()  # use [-1] instead of pop() because it's done by the inner _remove_lambdas()
+        return len(self._undo_stack)
 
-    def purge_undo(self, purge_last: int = 1, purge_all: bool = True,
-                   undo_stack: List[Union[Tuple[Callable, Callable], List[Tuple[Callable, Callable]]]] = None) -> int:
-        undo_stack = self._undo_stack if undo_stack is None else undo_stack  # used for recursive
-        if len(undo_stack) == 0 or purge_last < 1:
+    def purge_undo(self, purge_last: int = 1, purge_all: bool = True) -> int:
+        if len(self._undo_stack) == 0 or purge_last < 1:
             return -1  # nothing to purge
         purge_count = len(self._undo_stack) if purge_all else min(purge_last, len(self._undo_stack))
-        for _ in range(purge_count):
-            purge_lambdas = undo_stack.pop()
-            if isinstance(purge_lambdas, list):
-                self.purge_undo(purge_all=True, undo_stack=purge_lambdas)  # purge all lambdas in the list
-                undo_stack.remove(purge_lambdas)  # remove empty list
-            else:
-                purge_lambdas[1]()  # purge
-        return len(undo_stack)
+        for _ in range(purge_count):  # purge
+            (self._undo_stack.pop()[1])()
+        return len(self._undo_stack)
 
     def merge_undo(self, merge_last: int = 2, merge_all: bool = True):
         merge_count = len(self._undo_stack) if merge_all else max(min(merge_last, len(self._undo_stack)), 0)
-        merged_undo = self._undo_stack[-merge_count:]
+        merged_undo = reversed(self._undo_stack[-merge_count:])
         del self._undo_stack[-merge_count:]
-        self._undo_stack.append(merged_undo)  # merge multiple undo as a single one
+        self._register_func_undo(
+            [lambda: [undo_merged() for undo_merged, _ in merged_undo]],
+            lambda: [purge_merged() for purge_merged, _ in merged_undo]
+        )
 
     def _register_func_undo(self, local_undo_stack: List[Callable],
                             purge_callback: Callable = lambda: None) -> Callable:
-        def _remove_lambdas(undo_stack: List[Tuple[Callable, Callable]], target: Tuple[Callable, Callable]) -> bool:
-            for undo_lambdas in reversed(undo_stack):  # search from the end (as it's a stack)
-                if undo_lambdas == target:  # found target undo lambdas
-                    undo_stack.remove(undo_lambdas)
-                    return True
-                elif isinstance(undo_lambdas, list) and _remove_lambdas(undo_lambdas, target):  # found in list
-                    return True
-            return False
-
         def _undo_func() -> int:
             if hasattr(_undo_func, 'has_called'):  # should never call an undo twice
                 raise ValueError('NEVER invoke the returned `undo()` twice')
-            elif len(self._undo_stack) == 0:
-                return -1  # nothing to undo, happens when the undo has been purged
             else:
                 _undo_func.__setattr__('has_called', True)
                 while local_undo_stack:  # undo a function
                     (local_undo_stack.pop())()
-                _remove_lambdas(self._undo_stack, _undo_func._undo_lambdas)  # search and remove lambdas from the stack
+                if _undo_func._undo_lambdas not in self._undo_stack:
+                    return -1
+                self._undo_stack.remove(_undo_func._undo_lambdas)
                 return len(self._undo_stack)
 
         _undo_func._undo_lambdas = (lambda: _undo_func(), lambda: purge_callback())  # no memory leaks here
