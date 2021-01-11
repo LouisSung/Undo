@@ -10,16 +10,17 @@ class UndoAble:
     def undo(self, undo_all: bool = False, undo_times: int = 1) -> int:
         if len(self._undo_stack) == 0 or undo_times < 1:
             return -1  # nothing to undo
-        undo_times = len(self._undo_stack) if undo_all else min(undo_times, len(self._undo_stack))
-        for _ in range(undo_times):  # undo
-            (self._undo_stack[-1][0])()  # use [-1] instead of pop() because it's done by the inner _undo_func()
-        return len(self._undo_stack)
+        else:
+            undo_times = len(self._undo_stack) if undo_all else min(undo_times, len(self._undo_stack))
+            for _ in range(undo_times):  # undo n times
+                (self._undo_stack.pop()[0])()
+            return len(self._undo_stack)
 
     def purge_undo(self) -> int:
         if len(self._undo_stack) == 0:
             return -1  # nothing to purge
         else:
-            while self._undo_stack:
+            while self._undo_stack:  # purge all
                 (self._undo_stack.pop()[1])()
             return 0
 
@@ -40,9 +41,6 @@ class UndoAble:
                 _undo_func.__setattr__('has_called', True)
                 while local_undo_stack:  # undo a function
                     (local_undo_stack.pop())()
-                if _undo_func._undo_lambdas not in self._undo_stack:
-                    return -1
-                self._undo_stack.remove(_undo_func._undo_lambdas)
                 return len(self._undo_stack)
 
         _undo_func._undo_lambdas = (lambda: _undo_func(), lambda: purge_callback())  # no memory leaks here
@@ -77,7 +75,7 @@ if __name__ == '__main__':
     demo = UndoAbleFunc()
     # === [Basic] Undo ===
     result = demo.say_hi_to('Gura')  # use _ to consume useless undo
-    print('hihi01:', demo.hihi, '; result:',  result)  # hihi01: [[...], [...]] ; result: ['Hi', 'Gura']
+    print('hihi01:', demo.hihi, '; result:',  result)  # hihi01: [['Hi', 'Gura']] ; result: ['Hi', 'Gura']
     demo.undo()
     print('hihi02:', demo.hihi)  # hihi02: []
 
