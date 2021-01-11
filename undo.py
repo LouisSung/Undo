@@ -33,7 +33,7 @@ class UndoAble:
             lambda: [purge_merged() for _, purge_merged in merged_undo]
         )
 
-    def _register_func_undo(self, local_undo_stack: List[Callable], purge_callback: Callable = None):
+    def _register_func_undo(self, local_undo_stack: List[Callable], purge_callback: Callable = lambda: None):
         def _undo_func() -> int:
             if hasattr(_undo_func, 'has_called'):  # should never call an undo twice
                 raise ValueError('NEVER invoke the returned `undo()` twice')
@@ -43,7 +43,10 @@ class UndoAble:
                     (local_undo_stack.pop())()
                 return len(self._undo_stack)
 
-        _undo_func._undo_lambdas = (lambda: _undo_func(), lambda: (purge_callback or local_undo_stack.clear)())
+        _undo_func._undo_lambdas = (  # no memory leaks here
+            lambda: _undo_func(),  # invoke undo lambda
+            lambda: [purge() for purge in [purge_callback, local_undo_stack.clear]]  # invoke custom and default purge
+        )
         self._undo_stack.append(_undo_func._undo_lambdas)
 
 
