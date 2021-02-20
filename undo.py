@@ -17,6 +17,13 @@ class Undoable:
     def commit_undo(self, additional_undo_callback: Optional[Callable] = None,
                     additional_purge_callback: Optional[Callable] = None):
         """Group multiple added undo funcs as a single commit. Additional undo/purge callbacks could be provided"""
+        if self._counter_uncommitted_undo == 0:
+            return  # just do nothing
+        elif self._counter_uncommitted_undo == 1 and (  # when only one undo and no additional callbacks are provided
+                additional_undo_callback is None and additional_purge_callback is None):
+            self._counter_uncommitted_undo = 0  # should reset the counter
+            return
+
         pack_to_undo = self._undo_stack[-self._counter_uncommitted_undo:]  # group last k uncommitted undos from stack
         pack_to_undo.reverse()  # reverse the pack for the later invoke
         del self._undo_stack[-self._counter_uncommitted_undo:]  # remove these k undos from stack
