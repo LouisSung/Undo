@@ -3,10 +3,39 @@ import sys
 from typing import Callable, List, Optional, Tuple
 
 
-class UndoAble:
+class Undoable:
     def __init__(self):
         self._undo_stack: List[Tuple[Callable, Callable]] = []
         self._counter_uncommitted_undo = 0
+
+    def add_undo(self, thing_to_undo: Callable, purge_callback: Callable = lambda: None):
+        """[Usage] add_undo(lambda_func_for_undo, lambda_callback_for_purge = do_nothing_by_default)"""
+        self._undo_stack.append((thing_to_undo, purge_callback))
+        self._counter_uncommitted_undo += 1
+        # print(f'[Add Undo] stack {len(self._undo_stack)}, uncommitted undos {self._counter_uncommitted_undo}')
+
+    def commit_undo(self, additional_undo_callback: Optional[Callable] = None,
+                    additional_purge_callback: Optional[Callable] = None):
+        """Group multiple added undo funcs as a single commit. Additional undo/purge callbacks could be provided"""
+        pack_to_undo = self._undo_stack[-self._counter_uncommitted_undo:]  # group last k uncommitted undos from stack
+        pack_to_undo.reverse()  # reverse the pack for the later invoke
+        del self._undo_stack[-self._counter_uncommitted_undo:]  # remove these k undos from stack
+
+        # invoke undo and purge callbacks in the pack
+        undo_callbacks = lambda: [(undo[0])() for undo in pack_to_undo]
+        purge_callbacks = lambda: [(purge[1])() for purge in pack_to_undo]
+
+        # add additional callbacks to the pack if provided
+        actual_undo_callbacks = undo_callbacks if additional_undo_callback is None else (
+            lambda: [undo() for undo in [undo_callbacks, additional_undo_callback]]
+        )
+        actual_purge_callbacks = purge_callbacks if additional_purge_callback is None else (
+            lambda: [purge() for purge in [purge_callbacks, additional_purge_callback]]
+        )
+
+        self._undo_stack.append((actual_undo_callbacks, actual_purge_callbacks))
+        self._counter_uncommitted_undo = 0  # reset the counter
+        # print(f'[Commit Undo] stack: {len(self._undo_stack)}, undo pack: {len(pack_to_undo)}')
 
     def undo(self, undo_all: bool = False, undo_n_times: int = 1) -> int:
         """[Usage] undo(): undo 1 time; undo(True): undo ALL; undo(False, 5): undo 5 times"""
@@ -27,43 +56,14 @@ class UndoAble:
                 (self._undo_stack.pop()[1])()  # i.e., purge_one_commit()
             return 0  # i.e.. len(self._undo_stack), should ALWAYS be 0
 
-    def add_undo(self, thing_to_undo: Callable, purge_callback: Callable = lambda: None):
-        """[Usage] add_undo(lambda_func_for_undo, lambda_callback_for_purge = do_nothing_by_default)"""
-        self._undo_stack.append((thing_to_undo, purge_callback))
-        self._counter_uncommitted_undo += 1
-        print(f'[Add Undo] stack {len(self._undo_stack)}, uncommitted undos {self._counter_uncommitted_undo}')
 
-    def commit_undo(self, additional_undo_callback: Optional[Callable] = None,
-                    additional_purge_callback: Optional[Callable] = None):
-        """Group multiple added undo funcs as a single commit. An additional callback could be provided"""
-        pack_to_undo = self._undo_stack[-self._counter_uncommitted_undo:]  # group last k uncommitted undos from stack
-        pack_to_undo.reverse()  # reverse the pack for the later invoke
-        del self._undo_stack[-self._counter_uncommitted_undo:]  # remove these k undos from stack
-
-        # invoke undo and purge callbacks in the pack
-        undo_callbacks = lambda: [(undo[0])() for undo in pack_to_undo]
-        purge_callbacks = lambda: [(purge[1])() for purge in pack_to_undo]
-
-        # add additional callbacks to the pack if provided
-        actual_undo_callbacks = undo_callbacks if additional_undo_callback is None else (
-            lambda: [undo() for undo in [undo_callbacks, additional_undo_callback]]
-        )
-        actual_purge_callbacks = purge_callbacks if additional_purge_callback is None else (
-            lambda: [purge() for purge in [purge_callbacks, additional_purge_callback]]
-        )
-
-        self._undo_stack.append((actual_undo_callbacks, actual_purge_callbacks))
-        self._counter_uncommitted_undo = 0
-        print(f'[Commit Undo] stack: {len(self._undo_stack)}, undo pack: {len(pack_to_undo)}')
-
-
-class UndoableClass(UndoAble):
+class UndoableClass(Undoable):
     def __init__(self):
         super().__init__()
         self.hihi: List[List[str]] = []
 
     def say_hi_to(self, name: str) -> List[str]:
-        debug = print  # change as `lambda log: None` to disable printing
+        debug = lambda log: None  # change as `debug = print` to enable debug log
 
         # === Start Doing Stuff ===
         hi_list: List[str] = []
