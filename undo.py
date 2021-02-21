@@ -14,13 +14,15 @@ class Undoable:
         self._counter_uncommitted_undo += 1
         # print(f'[Add Undo] stack {len(self._undo_stack)}, uncommitted undos {self._counter_uncommitted_undo}')
 
-    def commit_undo(self, additional_undo_callback: Optional[Callable] = None,
-                    additional_purge_callback: Optional[Callable] = None):
-        """Group multiple added undo funcs as a single commit. Additional undo/purge callbacks could be provided"""
+    def commit_undo(self, postundo_callback: Optional[Callable] = None, postpurge_callback: Optional[Callable] = None,
+                    preundo_callback: Optional[Callable] = None, prepurge_callback: Optional[Callable] = None):
+        """Group multiple added undo funcs as a single commit. Extra undo/purge callbacks could be provided"""
+        no_extra_undo_callbacks: bool = (postundo_callback or preundo_callback) is None
+        no_extra_purge_callbacks: bool = (postpurge_callback or prepurge_callback) is None
         if self._counter_uncommitted_undo == 0:
             return  # just do nothing
-        elif self._counter_uncommitted_undo == 1 and (  # when only one undo and no additional callbacks are provided
-                additional_undo_callback is None and additional_purge_callback is None):
+        elif self._counter_uncommitted_undo == 1 and (  # when only one undo and no extra callbacks are provided
+                no_extra_undo_callbacks and no_extra_purge_callbacks):
             self._counter_uncommitted_undo = 0  # should reset the counter
             return
 
@@ -32,12 +34,15 @@ class Undoable:
         undo_callbacks = lambda: [(undo[0])() for undo in pack_to_undo]
         purge_callbacks = lambda: [(purge[1])() for purge in pack_to_undo]
 
-        # add additional callbacks to the pack if provided
-        actual_undo_callbacks = undo_callbacks if additional_undo_callback is None else (
-            lambda: [undo() for undo in [undo_callbacks, additional_undo_callback]]
+        # add extra callbacks to the committed undo pack if provided
+        do_nothing = lambda: None  # replace default None as `lambda: None` when not provided
+        (postundo_callback, postpurge_callback) = (postundo_callback or do_nothing, postpurge_callback or do_nothing)
+        (preundo_callback, prepurge_callback) = (preundo_callback or do_nothing, prepurge_callback or do_nothing)
+        actual_undo_callbacks = undo_callbacks if no_extra_undo_callbacks else (
+            lambda: [undo() for undo in [preundo_callback, undo_callbacks, postundo_callback]]
         )
-        actual_purge_callbacks = purge_callbacks if additional_purge_callback is None else (
-            lambda: [purge() for purge in [purge_callbacks, additional_purge_callback]]
+        actual_purge_callbacks = purge_callbacks if no_extra_purge_callbacks else (
+            lambda: [purge() for purge in [prepurge_callback, purge_callbacks, postpurge_callback]]
         )
 
         self._undo_stack.append((actual_undo_callbacks, actual_purge_callbacks))
@@ -84,7 +89,8 @@ class UndoableClass(Undoable):
         # # === End Doing Stuff ===
 
         # group those added undos as a commit_pack
-        self.commit_undo(lambda: debug('undo `4. commit`'), lambda: debug('purge `4. commit`'))
+        self.commit_undo(lambda: debug('postundo `4. commit`'), lambda: debug('postpurge `4. commit`'),
+                         lambda: debug('preundo `5. commit`'), lambda: debug('prepurge `5. commit`'))
         return hi_list
 
 
