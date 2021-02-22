@@ -17,8 +17,8 @@ class Undoable:
     def commit_undo(self, postundo_callback: Optional[Callable] = None, postpurge_callback: Optional[Callable] = None,
                     preundo_callback: Optional[Callable] = None, prepurge_callback: Optional[Callable] = None):
         """Group multiple added undo funcs as a single commit. Extra undo/purge callbacks could be provided"""
-        no_extra_undo_callbacks: bool = (postundo_callback or preundo_callback) is None
-        no_extra_purge_callbacks: bool = (postpurge_callback or prepurge_callback) is None
+        no_extra_undo_callbacks: bool = postundo_callback is None and preundo_callback is None
+        no_extra_purge_callbacks: bool = postpurge_callback is None and prepurge_callback is None
         if self._counter_uncommitted_undo == 0:
             return  # just do nothing
         elif self._counter_uncommitted_undo == 1 and (  # when only one undo and no extra callbacks are provided
